@@ -140,9 +140,21 @@ for coords, features, label in dataset_np:
     x = torch.tensor(features, dtype=torch.float)#.view(-1, 1)  # Node features
     r = torch.tensor(coords, dtype=torch.float)  # Node coordinates
     y = torch.tensor([label], dtype=torch.long)  # Label
-    # edge_index = torch.tensor([[0, 1], [1, 0]], dtype=torch.long)  # Dummy edge_index for example
-    
-    data = Data(x=x, r = r, y=y)
+    # edge_index = torch.tensor(np.identity(5), dtype=torch.long)
+    if(y[0].tolist() == 0):
+        edge_index = torch.tensor([[1,0,0,0,0,0],[1,0,0,0,0,0]], dtype=torch.long)  # Dummy edge_index for example
+    elif(y[0].tolist() == 1):
+        edge_index = torch.tensor([[0,1,0,0,0,0],[0,1,0,0,0,0]], dtype=torch.long)
+    elif(y[0].tolist() == 2):
+        edge_index = torch.tensor([[0,0,1,0,0,0],[0,0,1,0,0,0]], dtype=torch.long)
+    elif(y[0].tolist() == 3):
+        edge_index = torch.tensor([[0,0,0,1,0,0],[0,0,0,1,0,0]], dtype=torch.long)
+    elif(y[0].tolist() == 4):
+        edge_index = torch.tensor([[0,0,0,0,1,0],[0,0,0,0,1,0]], dtype=torch.long)
+    elif(y[0].tolist() == 5):
+        edge_index = torch.tensor([[0,0,0,0,0,1],[0,0,0,0,0,1]], dtype=torch.long)
+
+    data = Data(x=x, r = r, y=y,edge_index = edge_index)
     data_list.append(data)
 
 dataset = CustomGraphDataset(root = './data_set_toy', data_list = data_list)
@@ -154,13 +166,6 @@ from torch_geometric.loader import DataLoader
 
 dataloader = DataLoader(dataset, batch_size=16, shuffle=True)
 
-# for batch in dataset:
-#     for i in batch:
-#         print(i)
-
-# print(dataset.data.y)
-
-
 target = 0
 batch_size = 16
 
@@ -169,9 +174,21 @@ mean = dataset.data.y.mean(dim=0, keepdim=True)
 std = dataset.data.y.std(dim=0, keepdim=True)
 dataset.data.y = (dataset.data.y - mean) / std
 
-train_dataset = dataset[:1000]
-val_dataset = dataset[1000:1100]
-test_dataset = dataset[1100:1200]
+
+import random
+# random.seed(42)
+
+
+indices = list(range(6000))
+random.shuffle(indices)
+train_indices = indices[:4000]
+val_indices = indices[4000:5000]
+test_indices = indices[5000:6000]
+# Use these indices to get random subsets from the dataset
+train_dataset = [dataset[i] for i in train_indices]
+val_dataset = [dataset[i] for i in val_indices]
+test_dataset = [dataset[i] for i in test_indices]
+
 
 # DataLoader settings
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -180,48 +197,35 @@ test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
 
 from CustomGNN import CustomGNN
 from InvariantMPNN import InvariantMPNN
-invariant_model = CustomGNN(in_channels=dataset.num_node_features, hidden_channels=5, out_channels=dataset.num_classes, layer_type='invariant')
-cartesian_model = CustomGNN(in_channels=dataset.num_node_features, hidden_channels=5, out_channels=dataset.num_classes, layer_type='cartesian')
-
-
 import torch.nn.functional as F
 from torch.optim import Adam
 
-edge = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]])
 
-# for data in dataloader:
-#     # print(data)
-#     # print(data.x)
-#     # print(data.y)
-#     # print(data.r)
-#     # print(data.ptr)
-#     # print(data.batch)
-#     print(cartesian_model(data.x,data.r,edge,data.batch))
-    
-
-def train(loader, model, optimizer):
-    model.train()
+def train(loader, model, optimizer, device):
+    model.train()  # Set model to training mode
     total_loss = 0
+    num_samples = 0
+
     for data in loader:
-        # data = data.to('cuda')
+        data = data.to(device)  # Move data to the same device as the model
         optimizer.zero_grad()
-        out = model(data.x,data.r, edge,data.batch)
-        class_predicted = []
-        out = torch.softmax(out,dim=1)
-        # for elem in out:
-            # print(torch.argmax(out).item())
-            # class_predicted.append(torch.argmax(out).item())
-        # print(class_predicted) 
-        gt = torch.nn.functional.one_hot(data.y, 6)
-        gt= torch.tensor(gt, dtype = torch.float)
-        print(out.shape)
-        print(gt.shape)
-        # class_predicted = torch.tensor(class_predicted,dtype = torch.float)
-        loss = F.mse_loss(out, gt)
+
+        # Forward pass
+        out = model(data.x, data.r, data.edge_index, data.batch)
+        
+        # Calculate loss (use CrossEntropy for classification)
+        loss = F.cross_entropy(out, data.y.view(-1))  # Ensure labels are 1D
+        
+        # Backward pass and optimization step
         loss.backward()
         optimizer.step()
-        total_loss += loss.item()
-    return total_loss / len(loader)
+
+        # Accumulate loss
+        total_loss += loss.item() * data.num_graphs
+        num_samples += data.num_graphs
+
+    return total_loss / num_samples  # Normalize by the total number of graphs
+
 
 def test(loader, model, optimizer):
     model.eval()
@@ -229,18 +233,29 @@ def test(loader, model, optimizer):
     for data in loader:
         # data = data.to('cuda')
         with torch.no_grad():
-            out = model(data.x, data.pos, data.edge_index, data.batch)
-            error += (out - data.y[:, target, None]).abs().sum().item()
+            out = model(data.x, data.r, data.edge_index, data.batch)
+            gt = torch.nn.functional.one_hot(data.y, 6)
+            gt= torch.tensor(gt, dtype = torch.float)
+            error += (out - gt).abs().sum().item()
     return error / len(loader.dataset)
 
+# model = CustomGNN(in_channels=11, hidden_channels=64, out_channels=1, layer_type='spherical')
+# model = CustomGNN(in_channels=dataset.num_node_features, hidden_channels=5, out_channels=dataset.num_classes, layer_type='cartesian')
+model = CustomGNN(in_channels=dataset.num_node_features, hidden_channels=64, out_channels=dataset.num_classes, layer_type='invariant')
 
-optimizer = Adam(cartesian_model.parameters(), lr=0.001)
+optimizer = Adam(model.parameters(), lr=0.01)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-cartesian_model.to(device)
+model.to(device)
 
-target = 0  # Select the property index to predict
-
-for epoch in range(1, 1001):
-    loss = train(train_loader, cartesian_model, optimizer)
-    test_error = test(test_loader, cartesian_model, optimizer)
+for epoch in range(1, 80):
+    loss = train(train_loader, model, optimizer,device)
+    test_error = test(test_loader, model, optimizer)
     print(f'Epoch: {epoch:03d}, Loss: {loss:.4f}, Test MAE: {test_error:.4f}')
+
+for data in val_loader:
+    print(data.x)
+    out = model(data.x, data.r, data.edge_index, data.batch)
+    gt = torch.nn.functional.one_hot(data.y, 6)
+    gt= torch.tensor(gt, dtype = torch.float)
+    # print(out,gt)
+

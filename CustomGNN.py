@@ -4,6 +4,7 @@ from torch_geometric.nn import global_mean_pool
 
 from InvariantMPNN import InvariantMPNN
 from CartesianGNNLayer import CartesianGNNLayer
+from SphericalGNNLayer import SphericalGNNLayer
 
 class CustomGNN(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels, out_channels, layer_type='invariant'):

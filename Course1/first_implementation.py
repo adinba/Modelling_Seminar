@@ -161,7 +161,7 @@ gat_acc_test_values = []
 
 best_test_acc = 0
 early_stopping_counter = 0
-patience = 10
+patience = 100
 # Training loop with early stopping
 for epoch in range(1000):
     loss = gat_train()
@@ -259,3 +259,37 @@ plt.title('Training and Testing Accuracy Over Epochs')
 plt.legend()  # Adding the legend
 plt.grid(True)  # Optional: Adds grid for readability
 plt.show()
+
+import sklearn
+from sklearn.manifold import TSNE
+import numpy as np
+
+# Get model predictions (logits)
+gat_model.eval()
+with torch.no_grad():
+    embeddings = gat_model(data.x, data.edge_index)  # Get logits (pre-softmax)
+
+# Reduce dimensions using t-SNE
+tsne = TSNE(n_components=2, random_state=42, perplexity=30, learning_rate=200)
+embeddings_2d = tsne.fit_transform(embeddings.cpu().numpy())
+
+# Get predicted and true labels
+predicted_labels = embeddings.argmax(dim=1).cpu().numpy()
+true_labels = data.y.cpu().numpy()
+
+# Plot the decision space
+plt.figure(figsize=(12, 8))
+
+# Scatter plot for predicted labels
+scatter = plt.scatter(
+    embeddings_2d[:, 0], embeddings_2d[:, 1], 
+    c=predicted_labels, cmap='tab10', s=20, alpha=0.8, edgecolor='k'
+)
+plt.colorbar(scatter, label='Predicted Class')
+
+# Add title and labels
+plt.title('Decision Space Visualization (t-SNE)')
+plt.xlabel('t-SNE Dimension 1')
+plt.ylabel('t-SNE Dimension 2')
+plt.show()
+

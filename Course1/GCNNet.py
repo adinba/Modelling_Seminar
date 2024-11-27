@@ -8,7 +8,7 @@ from GATLayer import GATLayer
 import torch.nn.functional as F
 
 class GCNNet(nn.Module):
-    def __init__(self, in_channels, hidden_channels, out_channels,dropout=0.5):
+    def __init__(self, in_channels, hidden_channels, out_channels,dropout=0):
         super(GCNNet, self).__init__()
         self.conv1 = GCNLayer(in_channels, hidden_channels)
         self.conv2 = GCNLayer(hidden_channels, out_channels)
