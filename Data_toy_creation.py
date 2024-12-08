@@ -5,6 +5,46 @@ from torch_geometric.nn import MessagePassing
 from torch.nn import Linear
 import torch.nn.functional as F
 
+
+
+# Replace MAE by accuracy which is best suited for classification task
+def get_accuracy(predicted, true):
+    correct = (predicted == true).sum().item()  # Count of correct predictions
+    total = true.size(0)                        # Total number of predictions
+    return  correct / total  
+
+# Replace edge_index by the actual connection between letters (which leads to 100% accuracy after the first epoch)
+num_nodes=5
+def get_edge_index(indices):
+    return get_fully_connected_edge_index() #  Uncomment to test with fully connected
+    return np.concatenate(
+            (
+                np.array(
+                    list(indices[1:]) # one connection
+                    +list(indices[:-1]) # reverse connection
+                    +list(range(num_nodes)) # self connection
+                    )[None],
+                np.array(
+                    list(indices[:-1]) # one connection
+                    +list(indices[1:]) # reverse connection
+                    +list(range(num_nodes)) # self connection
+                    )[None]
+            )
+        )
+
+# Replace edge_index by a fully connected graph, I could only reach 83% acc, 
+# probably because some letters are the same when rotated, 
+# that could be verified with a confusion matrix ...
+def get_fully_connected_edge_index():
+    # Generate all combinations of source and target nodes
+    row = torch.arange(num_nodes).repeat(num_nodes)
+    col = torch.arange(num_nodes).repeat_interleave(num_nodes)
+    edge_index = torch.stack([row, col], dim=0)
+    return edge_index
+
+
+
+
 def add_third_dimension_and_repeat(point_cloud, n_repeats):
     """Add a third dimension to the point cloud and repeat it n_repeats times."""
     z = 3*np.arange(n_repeats)
@@ -61,38 +101,44 @@ for i in range(dataset_size):
         rotated_A = generate_rotations_3d(repeated_A, np.random.uniform(0, 2*np.pi), np.random.uniform(0, np.pi), np.random.uniform(0, 2*np.pi))
         rotated_A = rotated_A + random_shift[None, :]
         # all_feat = np.concatenate((rotated_A, features_rep), axis=1)
-        dataset_np.append((rotated_A, features_rep, class_label))
+        edge_index = get_edge_index(a_indices)
+        dataset_np.append((rotated_A, features_rep, class_label, edge_index))
         
     elif class_label == 1:
         repeated_B = add_third_dimension_and_repeat(B, repeats_numbers)
         rotated_B = generate_rotations_3d(repeated_B, np.random.uniform(0, 2*np.pi), np.random.uniform(0, np.pi), np.random.uniform(0, 2*np.pi))
         rotated_B = rotated_B + random_shift[None, :]
         # all_feat = np.concatenate((rotated_B, features_rep), axis=1)
-        dataset_np.append((rotated_B, features_rep, class_label))
+        edge_index = get_edge_index(b_indices)
+        dataset_np.append((rotated_B, features_rep, class_label, edge_index))
     elif class_label == 2:
         repeated_C = add_third_dimension_and_repeat(C, repeats_numbers)
         rotated_C = generate_rotations_3d(repeated_C, np.random.uniform(0, 2*np.pi), np.random.uniform(0, np.pi), np.random.uniform(0, 2*np.pi))
         rotated_C = rotated_C + random_shift[None, :]
         # all_feat = np.concatenate((rotated_C, features_rep), axis=1)
-        dataset_np.append((rotated_C, features_rep, class_label))
+        edge_index = get_edge_index(c_indices)
+        dataset_np.append((rotated_C, features_rep, class_label, edge_index))
     elif class_label == 3:
         repeated_D = add_third_dimension_and_repeat(D, repeats_numbers)
         rotated_D = generate_rotations_3d(repeated_D, np.random.uniform(0, 2*np.pi), np.random.uniform(0, np.pi), np.random.uniform(0, 2*np.pi))
         rotated_D = rotated_D + random_shift[None, :]
         # all_feat = np.concatenate((rotated_D, features_rep), axis=1)
-        dataset_np.append((rotated_D, features_rep, class_label))
+        edge_index = get_edge_index(d_indices)
+        dataset_np.append((rotated_D, features_rep, class_label, edge_index))
     elif class_label == 4:
         repeated_E = add_third_dimension_and_repeat(E, repeats_numbers)
         rotated_E = generate_rotations_3d(repeated_E, np.random.uniform(0, 2*np.pi), np.random.uniform(0, np.pi), np.random.uniform(0, 2*np.pi))
         rotated_E = rotated_E + random_shift[None, :]
         # all_feat = np.concatenate((rotated_E, features_rep), axis=1)
-        dataset_np.append((rotated_E, features_rep, class_label))
+        edge_index = get_edge_index(e_indices)
+        dataset_np.append((rotated_E, features_rep, class_label, edge_index))
     elif class_label == 5:
         repeated_F = add_third_dimension_and_repeat(F, repeats_numbers)
         rotated_F = generate_rotations_3d(repeated_F, np.random.uniform(0, 2*np.pi), np.random.uniform(0, np.pi), np.random.uniform(0, 2*np.pi))
         rotated_F = rotated_F + random_shift[None, :]
         # all_feat = np.concatenate((rotated_F, features_rep), axis=1)
-        dataset_np.append((rotated_F, features_rep, class_label))
+        edge_index = get_edge_index(f_indices)
+        dataset_np.append((rotated_F, features_rep, class_label, edge_index))
 
 import torch
 import torch_geometric
@@ -135,31 +181,43 @@ class CustomGraphDataset(InMemoryDataset):
     def save(self):
         torch.save((self.data, self.slices), self.processed_paths[0])
 
+import random
 data_list = []
-for coords, features, label in dataset_np:
-    x = torch.tensor(features, dtype=torch.float)#.view(-1, 1)  # Node features
-    r = torch.tensor(coords, dtype=torch.float)  # Node coordinates
+for coords, features, label, edge_index in dataset_np:
+
     y = torch.tensor([label], dtype=torch.long)  # Label
-    # edge_index = torch.tensor(np.identity(5), dtype=torch.long)
-    if(y[0].tolist() == 0):
-        edge_index = torch.tensor([[1,0,0,0,0,0],[1,0,0,0,0,0]], dtype=torch.long)  # Dummy edge_index for example
-    elif(y[0].tolist() == 1):
-        edge_index = torch.tensor([[0,1,0,0,0,0],[0,1,0,0,0,0]], dtype=torch.long)
-    elif(y[0].tolist() == 2):
-        edge_index = torch.tensor([[0,0,1,0,0,0],[0,0,1,0,0,0]], dtype=torch.long)
-    elif(y[0].tolist() == 3):
-        edge_index = torch.tensor([[0,0,0,1,0,0],[0,0,0,1,0,0]], dtype=torch.long)
-    elif(y[0].tolist() == 4):
-        edge_index = torch.tensor([[0,0,0,0,1,0],[0,0,0,0,1,0]], dtype=torch.long)
-    elif(y[0].tolist() == 5):
-        edge_index = torch.tensor([[0,0,0,0,0,1],[0,0,0,0,0,1]], dtype=torch.long)
+    edge_index = torch.tensor(edge_index, dtype=torch.long)
+
+    if(y[0].tolist() == 2): # Differenciation of C and E
+        features[0,1] = 1
+
+    # Including a random noise in the connections
+    # number_of_modified_edge = 200
+    # for i in range(number_of_modified_edge):
+    #     dim = features.shape
+    #     indices_aleatoires = [int(np.random.choice(dim[0],size=1, replace=True)),int(np.random.choice(dim[1],size=1, replace=True))] 
+    #     if(features[indices_aleatoires[0],indices_aleatoires[1]] == 1):
+    #         features[indices_aleatoires[0],indices_aleatoires[1]] = 0
+    #     features[indices_aleatoires[0],indices_aleatoires[1]] = 1
+
+    x = torch.tensor(features, dtype=torch.float)
+
+    # Including a random noise in the coordinates
+
+    number_of_modified_coord = 20
+    for i in range(number_of_modified_coord):    
+        dim = coords.shape
+        indices_aleatoires = [int(np.random.choice(dim[0],size=1, replace=True)),int(np.random.choice(dim[1],size=1, replace=True))] 
+        coords[indices_aleatoires[0],indices_aleatoires[1]] += np.random.normal(0,10)
+
+    r = torch.tensor(coords, dtype=torch.float)
+
 
     data = Data(x=x, r = r, y=y,edge_index = edge_index)
     data_list.append(data)
 
 dataset = CustomGraphDataset(root = './data_set_toy', data_list = data_list)
 
-# dataset.save()
 
 
 from torch_geometric.loader import DataLoader
@@ -229,33 +287,92 @@ def train(loader, model, optimizer, device):
 
 def test(loader, model, optimizer):
     model.eval()
-    error = 0
+    # error = 0
+    acc=0
     for data in loader:
         # data = data.to('cuda')
         with torch.no_grad():
             out = model(data.x, data.r, data.edge_index, data.batch)
-            gt = torch.nn.functional.one_hot(data.y, 6)
-            gt= torch.tensor(gt, dtype = torch.float)
-            error += (out - gt).abs().sum().item()
-    return error / len(loader.dataset)
+            # gt = torch.nn.functional.one_hot(data.y, 6)
+            # gt= torch.tensor(gt, dtype = torch.float)
+            # error += (out - gt).abs().sum().item()
+            acc += get_accuracy(out.argmax(dim=-1), data.y)
+    return acc / len(loader)
 
 # model = CustomGNN(in_channels=11, hidden_channels=64, out_channels=1, layer_type='spherical')
 # model = CustomGNN(in_channels=dataset.num_node_features, hidden_channels=5, out_channels=dataset.num_classes, layer_type='cartesian')
-model = CustomGNN(in_channels=dataset.num_node_features, hidden_channels=64, out_channels=dataset.num_classes, layer_type='invariant')
+model = CustomGNN(in_channels=dataset.num_node_features, hidden_channels=5, out_channels=dataset.num_classes, layer_type='invariant')
 
-optimizer = Adam(model.parameters(), lr=0.01)
+optimizer = Adam(model.parameters(), lr=0.001)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model.to(device)
 
-for epoch in range(1, 80):
+train_accuracies = []
+test_accuracies = []
+
+for epoch in range(1, 25):
     loss = train(train_loader, model, optimizer,device)
     test_error = test(test_loader, model, optimizer)
-    print(f'Epoch: {epoch:03d}, Loss: {loss:.4f}, Test MAE: {test_error:.4f}')
+    train_acc = test(train_loader, model, optimizer)
+    test_acc = test(test_loader, model, optimizer)
 
+    train_accuracies.append(train_acc)
+    test_accuracies.append(test_acc)
+
+    print(f'Epoch: {epoch:03d}, Loss: {loss:.4f}, Test ACC: {test_error:.4f}')
+
+
+# Plotting accuracy over epochs
+# plt.figure(figsize=(8, 5))
+# plt.plot(range(1, len(train_accuracies) + 1), train_accuracies, label="Train Accuracy", marker="o")
+# plt.plot(range(1, len(test_accuracies) + 1), test_accuracies, label="Test Accuracy", marker="s")
+# plt.title("Accuracy Over Epochs")
+# plt.xlabel("Epoch")
+# plt.ylabel("Accuracy")
+# plt.legend()
+# plt.grid()
+# plt.show()
+
+
+predicted_labels = []
+true_labels =[]
+acc=0
 for data in val_loader:
-    print(data.x)
+    # print(data.x)
     out = model(data.x, data.r, data.edge_index, data.batch)
-    gt = torch.nn.functional.one_hot(data.y, 6)
-    gt= torch.tensor(gt, dtype = torch.float)
-    # print(out,gt)
+    # gt = torch.nn.functional.one_hot(data.y, 6)
+    # gt= torch.tensor(gt, dtype = torch.float)
+    # # print(out,gt)
+    acc += get_accuracy(out.argmax(dim=-1), data.y)
+
+    predicted_labels += list(out.argmax(dim=-1))
+    true_labels += list(data.y)
+acc /= len(val_loader)
+print("Final accuracy %.2f %%"%(acc*100))
+
+def confusion_matrix(predicted, true, num_classes):
+    # Initialize the confusion matrix with zeros
+    conf_matrix = torch.zeros((num_classes, num_classes), dtype=torch.int64)
+    # Populate the confusion matrix
+    for t, p in zip(true, predicted):
+        conf_matrix[t, p] += 1
+
+    return conf_matrix
+
+
+print("Confusion Matrix:")
+print(confusion_matrix(predicted_labels, true_labels, 6))
+
+import seaborn as sns
+
+# Compute the confusion matrix
+conf_matrix = confusion_matrix(predicted_labels, true_labels, num_classes=6)
+
+# Plotting the confusion matrix
+plt.figure(figsize=(8, 6))
+sns.heatmap(conf_matrix, annot=True, fmt='d', cmap="Blues", xticklabels=range(6), yticklabels=range(6))
+plt.title("Confusion Matrix")
+plt.xlabel("Predicted Class")
+plt.ylabel("True Class")
+plt.show()
 

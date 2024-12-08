@@ -5,13 +5,13 @@ from torch_geometric.nn import GCNConv, GATConv, SAGEConv, GINConv, GraphConv
 import matplotlib.pyplot as plt
 
 # Hyperparameters
-model_type = 'CWL'  # Options: 'GCN', 'GAT', 'CWL', 'GIN', 'GraphSAGE'
-dropout_rate = 0.4
-weight_decay = 5e-4
-hidden_channels = 32
-num_layers = 1
+model_type = 'GraphSAGE'  # Options: 'GCN', 'GAT', 'CWL', 'GIN', 'GraphSAGE'
+dropout_rate = 0.5
+weight_decay = 5e-6
+hidden_channels = 64
+num_layers = 3
 num_heads = 16  # Only relevant for GAT
-learning_rate = 0.01
+learning_rate = 0.0001
 num_epochs = 300
 
 # Step 1: Load Dataset
@@ -107,7 +107,7 @@ for epoch in range(num_epochs):
     model.train()
     optimizer.zero_grad()
     out = model(data)
-    
+    print(epoch)
     # Training loss and accuracy
     train_loss = F.nll_loss(out[train_mask], data.y[train_mask])
     train_loss.backward()
@@ -141,19 +141,8 @@ for epoch in range(num_epochs):
         best_model_state = model.state_dict()  # Save model state
 
 # Step 5: Plot Training and Validation Loss Curves
-plt.figure(figsize=(12, 6))
-
-# Loss curves
-plt.subplot(1, 2, 1)
-plt.plot(train_losses, label='Train Loss')
-plt.plot(val_losses, label='Validation Loss')
-plt.xlabel('Epoch')
-plt.ylabel('Loss')
-plt.title(f'{model_type} Training and Validation Loss Curves')
-plt.legend()
 
 # Accuracy curves
-plt.subplot(1, 2, 2)
 plt.plot(train_accuracies, label='Train Accuracy')
 plt.plot(val_accuracies, label='Validation Accuracy')
 plt.plot(test_accuracies, label='Test Accuracy')
@@ -161,9 +150,8 @@ plt.xlabel('Epoch')
 plt.ylabel('Accuracy')
 plt.title(f'{model_type} Training, Validation, and Test Accuracy')
 plt.legend()
-
-plt.tight_layout()
 plt.show()
+
 
 # Step 6: Final Test Accuracy
 print(f'Final Training Accuracy ({model_type}): {train_accuracies[-1]:.4f}')
@@ -171,8 +159,30 @@ print(f'Final Validation Accuracy ({model_type}): {val_accuracies[-1]:.4f}')
 print(f'Final Test Accuracy ({model_type}): {test_accuracies[-1]:.4f}')
 print(f'Best Validation Accuracy ({model_type}): {best_val_accuracy:.4f}')
 
-# Step 7: Save the Best Model
-if best_model_state is not None:
-    torch.save(best_model_state, f'{model_type}_best_model.pth')
-    print(f'Best model saved as {model_type}_best_model.pth')
+# # Step 7: Save the Best Model
+# if best_model_state is not None:
+#     torch.save(best_model_state, f'{model_type}_best_model.pth')
+#     print(f'Best model saved as {model_type}_best_model.pth')
 
+import seaborn as sns
+from sklearn.metrics import confusion_matrix
+
+# Evaluate test predictions
+model.eval()
+with torch.no_grad():
+    test_predictions = model(data).argmax(dim=1)[test_mask]
+    test_labels = data.y[test_mask]
+
+# Calculate the confusion matrix
+cm = confusion_matrix(test_labels.cpu(), test_predictions.cpu())
+
+# Generate class labels based on the number of classes in the dataset
+class_labels = [f'Class {i}' for i in range(dataset.num_classes)]
+
+# Plot the confusion matrix using seaborn
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=class_labels, yticklabels=class_labels)
+plt.title(f'{model_type} Confusion Matrix')
+plt.xlabel('Predicted Label')
+plt.ylabel('True Label')
+
+plt.show()
